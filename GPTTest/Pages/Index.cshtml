@@ -1,0 +1,30 @@
+@page
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model GPTTest.Pages.Index
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>GPT Testing</title>
+</head>
+<body>
+<div>
+    <form method="post">
+    <div class="form-group">
+        <label class="form-field" asp-for="Message"></label>
+        <textarea asp-for="Message"></textarea>
+        <button type="submit">Send Message</button>
+    </div>
+
+        <label asp-for="APIResponse">@Model.APIResponse</label>
+        
+    </form>
+</div>
+</body>
+</html>
