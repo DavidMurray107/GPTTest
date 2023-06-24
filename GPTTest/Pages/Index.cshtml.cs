@@ -15,6 +15,8 @@ public class Index : PageModel
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<Index> _logger;
     
+    //TODO Sort out how to get the Date to be accurate when using 'tomorrow' as an option.
+    //Current Date seems to be entirely unknown to the system.
     public Index(IOpenAIService openAiService, IHttpClientFactory httpClientFactory, ILogger<Index> logger)
     {
         _openAiService = openAiService;
