@@ -15,8 +15,7 @@ public class Index : PageModel
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<Index> _logger;
     
-    //TODO Sort out how to get the Date to be accurate when using 'tomorrow' as an option.
-    //Current Date seems to be entirely unknown to the system.
+    
     public Index(IOpenAIService openAiService, IHttpClientFactory httpClientFactory, ILogger<Index> logger)
     {
         _openAiService = openAiService;
@@ -38,16 +37,18 @@ public class Index : PageModel
     {
         _logger.LogInformation("Post received " + Message);
         FunctionDefinitionBuilder builder = new FunctionDefinitionBuilder("CheckAppointmentAvailability",
-            "Checks whether the requested appointment is available").AddParameter("aptDate", "string",
-            "the requested UTC Appointment Time using the ISO 8601 Format ", required: true);
+            "Checks whether the requested appointment is available")
+            .AddParameter("aptDate", "string","the requested UTC Appointment Time using the ISO 8601 Format ", required: true);
          
         FunctionDefinition def = builder.Build();
         List<FunctionDefinition> functions = new List<FunctionDefinition>() { def };
+        
         var completionResult = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
         {
             Messages = new List<ChatMessage>
             {
                 ChatMessage.FromUser(Message),
+                ChatMessage.FromAssistant($"Today Date is {DateTime.UtcNow:O}")
             },
             Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo_0613,
             MaxTokens = 50, //optional
@@ -72,6 +73,7 @@ public class Index : PageModel
                         Messages = new List<ChatMessage>
                         {
                             ChatMessage.FromUser(Message),
+                            ChatMessage.FromAssistant($"Today Date is {DateTime.UtcNow:O}"),
                             ChatMessage.FromFunction(functionExecution, completionResult.Choices.First().Message.FunctionCall?.Name)
                         },
                         Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo_0613,
