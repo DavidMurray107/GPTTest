@@ -14,6 +14,7 @@
     <ItemGroup>
       <PackageReference Include="Betalgo.OpenAI" Version="7.1.2-beta" />
       <PackageReference Include="Betalgo.OpenAI.Utilities" Version="7.0.1" />
+      <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="7.0.8" />
       <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.8" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="7.0.8" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="7.0.8" />
@@ -26,6 +27,20 @@
       <PackageReference Include="Swashbuckle.AspNetCore.Swagger" Version="6.5.0" />
       <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="6.5.0" />
       <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="6.5.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="obj\Debug\net7.0\apphost.exe" />
+      <Content Include="obj\Debug\net7.0\GPTTest.assets.cache" />
+      <Content Include="obj\Debug\net7.0\GPTTest.csproj.FileListAbsolute.txt" />
+      <Content Include="obj\project.assets.json" />
+      <Content Include="obj\project.nuget.cache" />
+      <Content Include="obj\project.packagespec.json" />
+      <Content Include="obj\rider.project.restore.info" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Include="obj\Debug\net7.0\.NETCoreApp,Version=v7.0.AssemblyAttributes.cs" />
     </ItemGroup>
 
 </Project>
