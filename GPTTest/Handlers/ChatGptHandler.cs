@@ -93,18 +93,10 @@ public class ChatGptHandler : IChatGptHandler
             chatHistory = new List<ChatMessage>();
         return chatHistory;
     }
-    public async Task<string> SendChatMessage(string message, string connectionId,ChatGptMessageRoles messageRoles, string? name = null)
+
+    private void AddToChatHistory(List<ChatMessage> chatHistory, string message, string connectionId, ChatGptMessageRoles messageRoles, string? name = null)
     {
-        _logger.LogInformation("Send Message" + message);
-        string ChatResponse = "";
-
-        List<ChatMessage> chatHistory = GetChatHistory(connectionId);
-
-        foreach (var c in chatHistory)
-        {
-            _logger.LogInformation( $"{c.Role} Said {c.Content}");
-        }
-        
+        _logger.LogInformation($"Add {message} to History as {messageRoles.ToString()}");
         switch (messageRoles)
         {
             case ChatGptMessageRoles.System:
@@ -120,8 +112,21 @@ public class ChatGptHandler : IChatGptHandler
                 chatHistory.Add(ChatMessage.FromFunction(message, name));
                 break;
         }
-
         _memoryCache.Set(connectionId, chatHistory);
+    }
+    public async Task<string> SendChatMessage(string message, string connectionId,ChatGptMessageRoles messageRole, string? name = null)
+    {
+        _logger.LogInformation("Send Message" + message);
+        string ChatResponse = "";
+
+        List<ChatMessage> chatHistory = GetChatHistory(connectionId);
+
+        foreach (var c in chatHistory)
+        {
+            _logger.LogInformation( $"{c.Role} Said {c.Content}");
+        }
+
+        AddToChatHistory(chatHistory, message, connectionId, messageRole, name);
         
         var functions = GetAvailableFunctions();
         var completionResult = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
@@ -136,15 +141,20 @@ public class ChatGptHandler : IChatGptHandler
             _logger.LogInformation("Completion Result Successful!");
             _logger.LogInformation("Finish Reason "+ completionResult.Choices.First().FinishReason);
             _logger.LogInformation("Message Content "+ completionResult.Choices.First().Message.Content);
-            
             if (completionResult.Choices.First().FinishReason == "function_call")
             {
                 _logger.LogInformation($"ChatGPT Wants you to call a Function {completionResult.Choices.First().Message.FunctionCall?.Name} with the following Parameters {completionResult.Choices.First().Message.FunctionCall?.Arguments}");
                 var functionExecution = await ExecutionRegisteredFunction(completionResult.Choices?.First()?.Message?.FunctionCall?.Name ?? "", completionResult?.Choices?.First()?.Message?.FunctionCall?.ParseArguments() ?? new());
                 return await SendChatMessage(functionExecution, connectionId, ChatGptMessageRoles.Function, completionResult?.Choices?.First()?.Message?.FunctionCall?.Name ?? "");
             }
+            else
+            {
+                //Only add a response if the system says something.
+                ChatResponse = completionResult.Choices.First().Message.Content;
+                AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.System, name);
+            }
             
-            ChatResponse = completionResult.Choices.First().Message.Content;
+           
 
         }
         else

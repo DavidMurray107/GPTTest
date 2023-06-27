@@ -1,8 +1,10 @@
 ﻿"use strict";
 let connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
-
+ 
+connection.on('start', function(){document.getElementById('ConnectionId').textContent = connection.connectionId;});
 connection.start().then(function () {
     document.getElementById("sendButton").disabled = false;
+    
 }).catch(function (err) {
     return console.error(err.toString());
 });
