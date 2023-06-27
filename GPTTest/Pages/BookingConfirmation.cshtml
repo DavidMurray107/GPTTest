@@ -1,0 +1,46 @@
+﻿@page "{id?}"
+@model GPTTest.Pages.BookingConfirmation
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title></title>
+</head>
+<body>
+<div class="container">
+    @if (Model.Appointment is not null)
+    {
+        <div class="row">
+            <div class="col-2"><label asp-for="Appointment!.FirstName"></label></div>
+            <div class="col-4">
+                <input asp-for="Appointment!.FirstName" readonly="readonly"></input>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-2"><label asp-for="Appointment!.LastName"></label></div>
+            <div class="col-4">
+                <input asp-for="Appointment!.LastName" readonly="readonly"></input>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-2"><label asp-for="Appointment!.Date"></label></div>
+            <div class="col-4">
+                <input asp-for="Appointment!.Date" readonly="readonly"></input>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-2"><label asp-for="Appointment!.NumberOfPeople"></label></div>
+            <div class="col-4">
+                <input asp-for="Appointment!.NumberOfPeople" readonly="readonly"></input>
+            </div>
+        </div>
+    }
+</div>
+</body>
+</html>

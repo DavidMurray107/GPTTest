@@ -126,9 +126,10 @@ namespace GPTTest.API
         public async Task<IActionResult>? AppointmentSlotAvailable(DateTime date)
         {
             _logger.LogInformation("Checking Appointment availability for" + date.ToString("s"));
-            bool available = !(_context.Appointments?.Any(e => e.Date.Date == date.Date && e.Date.Hour == date.Hour))
+            bool available = !(_context.Appointments?.Any(e => e.Date.ToUniversalTime().Date == date.Date && e.Date.ToUniversalTime().Hour == date.Hour))
                 .GetValueOrDefault();
             _logger.LogInformation("Available: " + available);
+            
             return Ok(new { isAvailable = available });
         }
     }

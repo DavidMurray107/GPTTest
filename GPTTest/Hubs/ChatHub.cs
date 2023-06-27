@@ -18,7 +18,7 @@ public class ChatHub : Hub
         
         var connectionId =  Context.ConnectionId;
         await Clients.Caller.SendAsync("ReceiveMessage", user, message);
-        string chatGPTMessage =  await _chatGptHandler.SendChatMessage(message, connectionId, ChatGptMessageRoles.User);
+        string chatGPTMessage =  await _chatGptHandler.SendChatMessage(message, connectionId, ChatGptMessageRoles.User, user);
         await Clients.Caller.SendAsync("ReceiveMessage", "Chat", chatGPTMessage);
     }
 }
