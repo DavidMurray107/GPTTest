@@ -35,7 +35,7 @@ public class ChatGptHandler : IChatGptHandler
     {
         FunctionDefinitionBuilder checkAvailability = new FunctionDefinitionBuilder("CheckAppointmentAvailability",
                 "Checks whether the requested appointment is available")
-            .AddParameter("aptDate", "string", "the requested UTC Appointment Time using the ISO 8601 Format",
+            .AddParameter("aptDate", "string", "the requested UTC Appointment Date and Time using the ISO 8601 Format",
                 required: true);
 
         FunctionDefinition checkAvailabilityDefinition = checkAvailability.Build();
@@ -50,8 +50,20 @@ public class ChatGptHandler : IChatGptHandler
                 required: true);
 
         FunctionDefinition bookAppointmentDefinition = bookAppointment.Build();
+        FunctionDefinitionBuilder editAppointment = new FunctionDefinitionBuilder("EditPreviouslyBookedAppointment",
+                $"Edits an existing appointment. The confirmation will be available at {BaseUrl}/BookingConfirmation/:id: where :id: is the ID of the appointment. Return this link as an html anchor")
+            .AddParameter("id", "number", required: true)
+            .AddParameter("firstName", "string", required: true)
+            .AddParameter("lastName", "string", required: true)
+            .AddParameter("aptDate", "string",
+                description: "the requested UTC Appointment Time using the ISO 8601 Format", required: true)
+            .AddParameter("quantity", "number", description: "The number of people attending. Maximum 10",
+                required: true);
 
-        List<FunctionDefinition> functions = new() { checkAvailabilityDefinition, bookAppointmentDefinition };
+        FunctionDefinition editAppointmentDefinition = editAppointment.Build();
+
+        List<FunctionDefinition> functions = new()
+            { checkAvailabilityDefinition, bookAppointmentDefinition, editAppointmentDefinition };
         return functions;
     }
 
@@ -65,6 +77,12 @@ public class ChatGptHandler : IChatGptHandler
                 break;
             case "BookAppointment":
                 functionResult = await BookAppointment(arguments["firstName"].ToString(),
+                    arguments["lastName"].ToString(), arguments["aptDate"].ToString(),
+                    Int32.Parse(arguments["quantity"].ToString()));
+                break;
+            case "EditPreviouslyBookedAppointment":
+                functionResult = await EditPreviouslyBookedAppointment(Int32.Parse(arguments["id"].ToString()),
+                    arguments["firstName"].ToString(),
                     arguments["lastName"].ToString(), arguments["aptDate"].ToString(),
                     Int32.Parse(arguments["quantity"].ToString()));
                 break;
@@ -104,6 +122,10 @@ public class ChatGptHandler : IChatGptHandler
     {
         _logger.LogInformation(
             $"Booking Appointment for {firstName} {lastName} on {aptDate:G} for {quantity} attendees.");
+        if (string.IsNullOrEmpty(firstName))
+            return "First name Required";
+        if (string.IsNullOrEmpty(lastName))
+            return "Last name Required";
         if (quantity > 10)
             return "Too many people";
         if (!DateTime.TryParse(aptDate, out DateTime aDate))
@@ -132,14 +154,53 @@ public class ChatGptHandler : IChatGptHandler
         }
     }
 
+    private async Task<string> EditPreviouslyBookedAppointment(int id, string firstName, string lastName,
+        string aptDate, int quantity)
+    {
+        _logger.LogInformation(
+            $"Editing Previously Booking Appointment {id} for {firstName} {lastName} on {aptDate:G} for {quantity} attendees.");
+        if (string.IsNullOrEmpty(firstName))
+            return "First name Required";
+        if (string.IsNullOrEmpty(lastName))
+            return "Last name Required";
+        if (quantity > 10)
+            return "Too many people";
+        if (!DateTime.TryParse(aptDate, out DateTime aDate))
+            return "Date Invalid";
+        Appointment appointment = new()
+            { Id = id, FirstName = firstName, LastName = lastName, Date = aDate, NumberOfPeople = quantity };
+
+        using HttpClient client = _httpClientFactory.CreateClient();
+        string APIEndpoint =
+            $"{BaseUrl}/API/Appointment/{id}";
+        try
+        {
+            var result = await client.PutAsJsonAsync(APIEndpoint, appointment);
+
+            if (result.IsSuccessStatusCode)
+            {
+                return $"Success {result.Content.ReadAsStringAsync().Result}";
+            }
+
+            return $"Error:{result.Content.ReadAsStringAsync().Result}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error: " + ex.ToString());
+            return "Error: " + ex.ToString();
+        }
+    }
+
     private List<ChatMessage> InitializeConversationPrompts()
     {
         return new()
         {
-            ChatMessage.FromSystem($"Answer questions as a receptionist that handles bookies at the office. Today's Date is {DateTime.UtcNow:O}. "
-            + $"Don't make assumptions about what values to plug into functions. Ask for clarification"
-            + $"You should always check for appointment availability before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and send them an HTML Link."
-            + $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. Whenever the user gives you a time it is in this timezone unless explicitly stated."),
+            ChatMessage.FromSystem(
+                $"Answer questions as a receptionist that handles bookies at the office. Today's Date is {DateTime.UtcNow:O}. "
+                + $"Don't make assumptions about what values to plug into functions. Ask for clarification. "
+                + $"You should always check for appointment availability before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and send them an HTML Link. "
+                + $"You cannot book any appointments in the past. "
+                + $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. Whenever the user gives you a time it is in this timezone unless explicitly stated. "),
         };
     }
 
@@ -162,8 +223,6 @@ public class ChatGptHandler : IChatGptHandler
         switch (messageRoles)
         {
             case ChatGptMessageRoles.System:
-               
-            
                 chatHistory.Add(ChatMessage.FromSystem(message));
                 break;
             case ChatGptMessageRoles.User:
@@ -220,8 +279,9 @@ public class ChatGptHandler : IChatGptHandler
                 {
                     _logger.LogInformation(
                         $"ChatGPT Wants you to call a Function {completionResult.Choices.First().Message.FunctionCall?.Name} with the following Parameters {completionResult.Choices.First().Message.FunctionCall?.Arguments}");
-                    
-                    AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name, completionResult.Choices.First().Message.FunctionCall);
+
+                    AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name,
+                        completionResult.Choices.First().Message.FunctionCall);
                     var functionExecution = await ExecutionRegisteredFunction(
                         completionResult.Choices?.First()?.Message?.FunctionCall?.Name ?? "",
                         completionResult?.Choices?.First()?.Message?.FunctionCall?.ParseArguments() ?? new());
