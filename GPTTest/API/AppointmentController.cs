@@ -128,9 +128,20 @@ namespace GPTTest.API
             _logger.LogInformation("Checking Appointment availability for" + date.ToString("s"));
             bool available = !(_context.Appointments?.Any(e => e.Date.ToUniversalTime().Date == date.Date && e.Date.ToUniversalTime().Hour == date.Hour))
                 .GetValueOrDefault();
+            DateTime nextAvailableTime = date; 
+            if (!available)
+            {
+                bool next = false;
+                while (!next)
+                {
+                    nextAvailableTime = nextAvailableTime.AddHours(1);
+                    next = !(_context.Appointments?.Any(e => e.Date.ToUniversalTime().Date == nextAvailableTime.Date && e.Date.ToUniversalTime().Hour == nextAvailableTime.Hour))
+                        .GetValueOrDefault();
+                }
+            }
             _logger.LogInformation("Available: " + available);
             
-            return Ok(new { isAvailable = available });
+            return Ok(new { isAvailable = available, nextAvailableTime = nextAvailableTime.ToString("R") });
         }
     }
 }
