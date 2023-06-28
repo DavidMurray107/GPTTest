@@ -136,10 +136,10 @@ public class ChatGptHandler : IChatGptHandler
     {
         return new()
         {
-            ChatMessage.FromSystem(
-                $"Answer questions as a receptionist that handles bookies at the office. Today's Date is {DateTime.UtcNow:O}. " +
-                $"You should always confirm an appointment is available before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and redirect them to the site using a link formatted as an HTML Anchor tag." +
-                $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. You should always assume the user is talking to you referencing their own time zone")
+            ChatMessage.FromSystem($"Answer questions as a receptionist that handles bookies at the office. Today's Date is {DateTime.UtcNow:O}. "
+            + $"Don't make assumptions about what values to plug into functions. Ask for clarification"
+            + $"You should always check for appointment availability before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and send them an HTML Link."
+            + $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. Whenever the user gives you a time it is in this timezone unless explicitly stated."),
         };
     }
 
@@ -156,19 +156,24 @@ public class ChatGptHandler : IChatGptHandler
     }
 
     private void AddToChatHistory(List<ChatMessage> chatHistory, string message, string connectionId,
-        ChatGptMessageRoles messageRoles, string? name = null)
+        ChatGptMessageRoles messageRoles, string? name = null, FunctionCall? functionCall = null)
     {
         _logger.LogInformation($"Add {message} to History as {messageRoles.ToString()}");
         switch (messageRoles)
         {
             case ChatGptMessageRoles.System:
-                chatHistory.Add(ChatMessage.FromSystem(message, name));
+               
+            
+                chatHistory.Add(ChatMessage.FromSystem(message));
                 break;
             case ChatGptMessageRoles.User:
-                chatHistory.Add(ChatMessage.FromUser(message, name));
+                chatHistory.Add(ChatMessage.FromUser(message));
                 break;
             case ChatGptMessageRoles.Assistant:
-                chatHistory.Add(ChatMessage.FromAssistant(message, name));
+                var assistantChat = ChatMessage.FromAssistant(message);
+                if (functionCall is not null)
+                    assistantChat.FunctionCall = functionCall;
+                chatHistory.Add(assistantChat);
                 break;
             case ChatGptMessageRoles.Function:
                 chatHistory.Add(ChatMessage.FromFunction(message, name));
@@ -192,7 +197,7 @@ public class ChatGptHandler : IChatGptHandler
         var completionResult = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
         {
             Messages = chatHistory,
-            Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo_0613,
+            Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo,
             MaxTokens = 500, //optional
             Functions = functions
         });
@@ -215,6 +220,8 @@ public class ChatGptHandler : IChatGptHandler
                 {
                     _logger.LogInformation(
                         $"ChatGPT Wants you to call a Function {completionResult.Choices.First().Message.FunctionCall?.Name} with the following Parameters {completionResult.Choices.First().Message.FunctionCall?.Arguments}");
+                    
+                    AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name, completionResult.Choices.First().Message.FunctionCall);
                     var functionExecution = await ExecutionRegisteredFunction(
                         completionResult.Choices?.First()?.Message?.FunctionCall?.Name ?? "",
                         completionResult?.Choices?.First()?.Message?.FunctionCall?.ParseArguments() ?? new());
