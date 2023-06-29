@@ -12,8 +12,9 @@ var folder = Environment.SpecialFolder.LocalApplicationData;
 var path = Environment.GetFolderPath(folder);
 string DbPath = System.IO.Path.Join(path, "GPTTest.db");
 //Create a DB for test purposes at %LocalAppData/GPTTest.db%
-builder.Services.AddDbContext<GptTestContext>(opt =>
-    opt.UseSqlite(@$"Data Source={DbPath}"));
+//builder.Services.AddDbContext<GptTestContext>(opt =>
+//    opt.UseSqlite(@$"Data Source={DbPath}"));
+builder.Services.AddDbContext<GptTestContext>(opt => opt.UseSqlServer($@"Server=localhost;Initial Catalog=GPTTest;Trusted_Connection=True;TrustServerCertificate=True;"));
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

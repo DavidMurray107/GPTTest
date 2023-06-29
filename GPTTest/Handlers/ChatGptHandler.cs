@@ -208,7 +208,7 @@ public class ChatGptHandler : IChatGptHandler
         return new()
         {
             ChatMessage.FromSystem(
-                $"Answer questions as a receptionist that handles bookies at the office. Today's DateTime is {DateTime.UtcNow:O}. "
+                $"Answer questions as a receptionist that handles bookings at the office. Today's DateTime is {DateTime.UtcNow:O}. "
                 + $"Don't make assumptions about what values to plug into functions. Ask for clarification. If you do not know the User's name or how many people are attending be sure to ask."
                 + $"Before trying to book an appointment always display all parameters back to the user and ask for confirmation. "
                 + $"You should always check for appointment availability before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and send them an HTML Link. "
