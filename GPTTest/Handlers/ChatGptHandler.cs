@@ -4,9 +4,11 @@ using GPTTest.Models;
 using Microsoft.EntityFrameworkCore.Query.Internal;
 using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
+using NuGet.Protocol;
 using OpenAI.Interfaces;
 using OpenAI.ObjectModels;
 using OpenAI.ObjectModels.RequestModels;
+using OpenAI.ObjectModels.ResponseModels;
 using OpenAI.ObjectModels.SharedModels;
 
 namespace GPTTest.Handlers;
@@ -19,14 +21,24 @@ public class ChatGptHandler : IChatGptHandler
     private readonly HttpRequest? _request;
     private readonly IMemoryCache _memoryCache;
     private readonly string BaseUrl;
+    private readonly GptTestContext _context;
+    private int RetryCount { get; set; } = 0;
+
+    private int MaxRetries
+    {
+        get;
+    } = 3;
+
+    private int RateLimitRetries { get; set; } = 0;
 
     public ChatGptHandler(IOpenAIService openAiService, IHttpClientFactory httpClientFactory,
-        ILogger<ChatGptHandler> logger, IHttpContextAccessor httpContextAccessor, IMemoryCache memoryCache)
+        ILogger<ChatGptHandler> logger, IHttpContextAccessor httpContextAccessor, IMemoryCache memoryCache, GptTestContext context)
     {
         _openAiService = openAiService;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _memoryCache = memoryCache;
+        _context = context;
         _request = httpContextAccessor.HttpContext?.Request;
         BaseUrl = $"{_request?.Scheme}://{_request?.Host}";
     }
@@ -35,7 +47,7 @@ public class ChatGptHandler : IChatGptHandler
     {
         FunctionDefinitionBuilder checkAvailability = new FunctionDefinitionBuilder("CheckAppointmentAvailability",
                 "Checks whether the requested appointment is available")
-            .AddParameter("aptDate", "string", "the requested UTC Appointment Date and Time using the ISO 8601 Format",
+            .AddParameter("aptDate", "string", "the requested Local to user Appointment Date and Time using the ISO 8601 Format",
                 required: true);
 
         FunctionDefinition checkAvailabilityDefinition = checkAvailability.Build();
@@ -45,7 +57,7 @@ public class ChatGptHandler : IChatGptHandler
             .AddParameter("firstName", "string", required: true)
             .AddParameter("lastName", "string", required: true)
             .AddParameter("aptDate", "string",
-                description: "the requested UTC Appointment Time using the ISO 8601 Format", required: true)
+                description: "the requested Local to user Appointment Time using the ISO 8601 Format", required: true)
             .AddParameter("quantity", "number", description: "The number of people attending. Maximum 10",
                 required: true);
 
@@ -56,7 +68,7 @@ public class ChatGptHandler : IChatGptHandler
             .AddParameter("firstName", "string", required: true)
             .AddParameter("lastName", "string", required: true)
             .AddParameter("aptDate", "string",
-                description: "the requested UTC Appointment Time using the ISO 8601 Format", required: true)
+                description: "the requested Local to user Appointment Time using the ISO 8601 Format", required: true)
             .AddParameter("quantity", "number", description: "The number of people attending. Maximum 10",
                 required: true);
 
@@ -196,11 +208,13 @@ public class ChatGptHandler : IChatGptHandler
         return new()
         {
             ChatMessage.FromSystem(
-                $"Answer questions as a receptionist that handles bookies at the office. Today's Date is {DateTime.UtcNow:O}. "
-                + $"Don't make assumptions about what values to plug into functions. Ask for clarification. "
+                $"Answer questions as a receptionist that handles bookies at the office. Today's DateTime is {DateTime.UtcNow:O}. "
+                + $"Don't make assumptions about what values to plug into functions. Ask for clarification. If you do not know the User's name or how many people are attending be sure to ask."
+                + $"Before trying to book an appointment always display all parameters back to the user and ask for confirmation. "
                 + $"You should always check for appointment availability before booking it. If the appointment is unavailable do not book the appointment. If you want to book an appointment you should always confirm the details to the user and send them an HTML Link. "
-                + $"You cannot book any appointments in the past. "
-                + $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. Whenever the user gives you a time it is in this timezone unless explicitly stated. "),
+                + $"You cannot book any appointments in the past. " 
+                + $"If clarifying dates use the ISO 8601 date format translated to the user's local time zone. "
+                + $"The user's Timezone is {(TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName)}. Always use the local time zone. "),
         };
     }
 
@@ -216,107 +230,191 @@ public class ChatGptHandler : IChatGptHandler
         return chatHistory;
     }
 
-    private void AddToChatHistory(List<ChatMessage> chatHistory, string message, string connectionId,
+    private ChatMessage? AddToChatHistory(List<ChatMessage> chatHistory, string message, string connectionId,
         ChatGptMessageRoles messageRoles, string? name = null, FunctionCall? functionCall = null)
     {
         _logger.LogInformation($"Add {message} to History as {messageRoles.ToString()}");
+        ChatMessage newMessage = null;
         switch (messageRoles)
         {
             case ChatGptMessageRoles.System:
-                chatHistory.Add(ChatMessage.FromSystem(message));
+                newMessage =ChatMessage.FromSystem(message);
+                _context.ChatHistories.Add(new ChatHistory()
+                    {
+                        ConversationId = connectionId,
+                        CreatedAt = DateTime.Now,
+                        Message = message,
+                        SentBy = "System"
+                    }
+                );
                 break;
             case ChatGptMessageRoles.User:
-                chatHistory.Add(ChatMessage.FromUser(message));
+                newMessage =ChatMessage.FromUser(message);
+                _context.ChatHistories.Add(new ChatHistory()
+                    {
+                        ConversationId = connectionId,
+                        CreatedAt = DateTime.Now,
+                        Message = message,
+                        SentBy = "User - " + name
+                    }
+                );
                 break;
             case ChatGptMessageRoles.Assistant:
                 var assistantChat = ChatMessage.FromAssistant(message);
                 if (functionCall is not null)
                     assistantChat.FunctionCall = functionCall;
-                chatHistory.Add(assistantChat);
+                newMessage = assistantChat;
+                _context.ChatHistories.Add(new ChatHistory()
+                    {
+                        ConversationId = connectionId,
+                        CreatedAt = DateTime.Now,
+                        Message = message + (functionCall is not null ? $"Function: { functionCall.ToJson()}" : ""),
+                        SentBy = "Assistant"
+                    }
+                );
                 break;
             case ChatGptMessageRoles.Function:
-                chatHistory.Add(ChatMessage.FromFunction(message, name));
+                newMessage = ChatMessage.FromFunction(message, name);
+                _context.ChatHistories.Add(new ChatHistory()
+                    {
+                        ConversationId = connectionId,
+                        CreatedAt = DateTime.Now,
+                        Message = message,
+                        SentBy = "Function"
+                    }
+                );
+                break;
+            default:
                 break;
         }
-
+        chatHistory.Add(newMessage);
+        _context.SaveChanges();
         _memoryCache.Set(connectionId, chatHistory);
+        return newMessage;
     }
 
     public async Task<string> SendChatMessage(string message, string connectionId, ChatGptMessageRoles messageRole,
         string? name = null)
     {
+        RateLimitRetries = 0;
         _logger.LogInformation("Send Message" + message);
         string ChatResponse = "";
 
         List<ChatMessage> chatHistory = GetChatHistory(connectionId);
 
-        AddToChatHistory(chatHistory, message, connectionId, messageRole, name);
+        var currentMessage = AddToChatHistory(chatHistory, message, connectionId, messageRole, name);
 
         var functions = GetAvailableFunctions();
-        var completionResult = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
+        ChatCompletionCreateResponse completionResult = null;
+        bool processing = true;
+
+        while (processing)
         {
-            Messages = chatHistory,
-            Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo,
-            MaxTokens = 500, //optional
-            Functions = functions
-        });
-        if (completionResult.Successful)
-        {
-            _logger.LogInformation("Completion Result Successful!");
-            _logger.LogInformation("Finish Reason " + completionResult.Choices.First().FinishReason);
-            _logger.LogInformation("Message Content " + completionResult.Choices.First().Message.Content);
-            /*
-             Available Finish Reasons.
-                    stop: API returned complete message, or a message terminated by one of the stop sequences provided via the stop parameter
-                    length: Incomplete model output due to max_tokens parameter or token limit
-                    function_call: The model decided to call a function
-                    content_filter: Omitted content due to a flag from our content filters
-                    null: API response still in progress or incomplete
-            */
-            switch (completionResult.Choices.First().FinishReason)
+            while (completionResult == null && RetryCount < MaxRetries)
             {
-                case "function_call":
+                try
                 {
-                    _logger.LogInformation(
-                        $"ChatGPT Wants you to call a Function {completionResult.Choices.First().Message.FunctionCall?.Name} with the following Parameters {completionResult.Choices.First().Message.FunctionCall?.Arguments}");
-
-                    AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name,
-                        completionResult.Choices.First().Message.FunctionCall);
-                    var functionExecution = await ExecutionRegisteredFunction(
-                        completionResult.Choices?.First()?.Message?.FunctionCall?.Name ?? "",
-                        completionResult?.Choices?.First()?.Message?.FunctionCall?.ParseArguments() ?? new());
-                    return await SendChatMessage(functionExecution, connectionId, ChatGptMessageRoles.Function,
-                        completionResult?.Choices?.First()?.Message?.FunctionCall?.Name ?? "");
+                    completionResult = await _openAiService.ChatCompletion.CreateCompletion(
+                        new ChatCompletionCreateRequest
+                        {
+                            Messages = chatHistory,
+                            Model = OpenAI.ObjectModels.Models.Gpt_3_5_Turbo,
+                            MaxTokens = 500, //optional
+                            Functions = functions
+                        });
                 }
-                case "content_filter":
-                case "length":
-                case "stop":
-                default:
-                    //Only add a response if the system says something.
-                    if (!string.IsNullOrEmpty(completionResult.Choices.First().Message.Content))
-                    {
-                        ChatResponse = completionResult.Choices.First().Message.Content;
-                        AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name);
-                    }
-
-                    break;
+                catch (TimeoutException timeoutException)
+                {
+                    RetryCount++;
+                    _logger.LogError("Connection Timeout: " + timeoutException.ToString());
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError("An issue occured when attempting to create the chat completion: " + exception.ToString());
+                }
             }
-        }
-        else
-        {
-            if (completionResult.Error == null)
+
+            RetryCount = 0;
+
+            if (completionResult is not null && completionResult.Successful)
             {
-                _logger.LogError("Unknown Error");
-                //throw new Exception();
+                _logger.LogInformation("Completion Result Successful!");
+                _logger.LogInformation("Finish Reason " + completionResult.Choices.First().FinishReason);
+                _logger.LogInformation("Message Content " + completionResult.Choices.First().Message.Content);
+
+                /*
+                 Available Finish Reasons.
+                        stop: API returned complete message, or a message terminated by one of the stop sequences provided via the stop parameter
+                        length: Incomplete model output due to max_tokens parameter or token limit
+                        function_call: The model decided to call a function
+                        content_filter: Omitted content due to a flag from our content filters
+                        null: API response still in progress or incomplete
+                */
+                switch (completionResult.Choices.First().FinishReason)
+                {
+                    case "function_call":
+                    {
+                        _logger.LogInformation(
+                            $"ChatGPT Wants you to call a Function {completionResult.Choices.First().Message.FunctionCall?.Name} with the following Parameters {completionResult.Choices.First().Message.FunctionCall?.Arguments}");
+
+                        AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant, name,
+                            completionResult.Choices.First().Message.FunctionCall);
+                        var functionExecution = await ExecutionRegisteredFunction(
+                            completionResult.Choices?.First()?.Message?.FunctionCall?.Name ?? "",
+                            completionResult?.Choices?.First()?.Message?.FunctionCall?.ParseArguments() ?? new());
+                        return await SendChatMessage(functionExecution, connectionId, ChatGptMessageRoles.Function,
+                            completionResult?.Choices?.First()?.Message?.FunctionCall?.Name ?? "");
+                    }
+                    case "content_filter":
+                    case "length":
+                    case "stop":
+                    default:
+                        //Only add a response if the system says something.
+                        if (!string.IsNullOrEmpty(completionResult.Choices.First().Message.Content))
+                        {
+                            ChatResponse = completionResult.Choices.First().Message.Content;
+                            AddToChatHistory(chatHistory, ChatResponse, connectionId, ChatGptMessageRoles.Assistant,
+                                name);
+                        }
+
+                        break;
+                }
+
+                processing = false;
             }
+            else
+            {
+                if (completionResult?.Error == null)
+                {
+                    _logger.LogError("Unknown Error");
+                    //throw new Exception();
+                }
 
-            //we experienced an error lets remove the last user response from the list and try again.
-            chatHistory.RemoveAt(chatHistory.Count - 1);
-            _logger.LogError(
-                $"Code: {completionResult?.Error?.Code}{Environment.NewLine}Message:{completionResult?.Error?.Message}{Environment.NewLine}Param: {completionResult?.Error?.Param}{Environment.NewLine}Type: {completionResult?.Error?.Type}");
+                //we experienced an error lets remove the last user response from the list and try again.
+                if(currentMessage is not null)
+                    chatHistory.Remove(currentMessage);
+                
+                _logger.LogError(
+                    $"Code: {completionResult?.Error?.Code}{Environment.NewLine}Message:{completionResult?.Error?.Message}{Environment.NewLine}Param: {completionResult?.Error?.Param}{Environment.NewLine}Type: {completionResult?.Error?.Type}");
 
-
-            ChatResponse = "I'm sorry I am experiencing technical difficulties please try again in a moment.";
+                //Rate limit hit, pause 20 seconds and try the request again.
+                if (completionResult?.Error?.Type == "requests")
+                {
+                    //timeout for 30 sec then try again.
+                    int fact = 1;
+                    for (int x = 1; x <= RateLimitRetries; x++)
+                    {
+                        fact *= x;
+                    }
+                    int sleepTime = 20 * 1000 * fact; 
+                    _logger.LogInformation("Rate Limit Pause starting. Will pause for " + sleepTime / 1000 + " seconds");
+                    completionResult = null;
+                    Thread.Sleep(sleepTime);
+                    RateLimitRetries++;
+                }
+                ChatResponse = "I'm sorry I am experiencing technical difficulties please try again in a moment.";
+            }
+            
         }
 
         return ChatResponse;

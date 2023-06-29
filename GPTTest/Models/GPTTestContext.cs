@@ -11,5 +11,6 @@ public class GptTestContext : DbContext
     }
 
     public DbSet<Appointment> Appointments { get; set; } = null!;
+    public DbSet<ChatHistory> ChatHistories { get; set; } = null!;
 
 }

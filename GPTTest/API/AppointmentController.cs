@@ -125,8 +125,8 @@ namespace GPTTest.API
         [HttpGet("AppointmentAvailable")]
         public async Task<IActionResult>? AppointmentSlotAvailable(DateTime date)
         {
-            _logger.LogInformation("Checking Appointment availability for" + date.ToString("s"));
-            bool available = !(_context.Appointments?.Any(e => e.Date.ToUniversalTime().Date == date.Date && e.Date.ToUniversalTime().Hour == date.Hour))
+            _logger.LogInformation("Checking Appointment availability for" + date.ToString("R"));
+            bool available = !(_context.Appointments?.Any(e => e.Date.Date == date.Date && e.Date.Hour == date.Hour))
                 .GetValueOrDefault();
             DateTime nextAvailableTime = date; 
             if (!available)
@@ -135,7 +135,7 @@ namespace GPTTest.API
                 while (!next)
                 {
                     nextAvailableTime = nextAvailableTime.AddHours(1);
-                    next = !(_context.Appointments?.Any(e => e.Date.ToUniversalTime().Date == nextAvailableTime.Date && e.Date.ToUniversalTime().Hour == nextAvailableTime.Hour))
+                    next = !(_context.Appointments?.Any(e => e.Date.Date == nextAvailableTime.Date && e.Date.Hour == nextAvailableTime.Hour))
                         .GetValueOrDefault();
                 }
             }
